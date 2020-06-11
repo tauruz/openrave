@@ -38,6 +38,15 @@ enum GeometryType {
     GT_Cage=6, ///< a container shaped geometry with removable side walls. The side walls can be on any of the four sides. The origin is at the bottom of the base. The inner volume of the cage is measured from the base to the highest wall.
 };
 
+enum DynamicsConstraintsType {
+    DC_Unknown = -1, ///< constraints type is not set.
+    DC_IgnoreTorque        = 0, ///< Do no check torque limits
+    DC_NominalTorque       = 1, ///< Compute and check torque limits using nominal torque
+    DC_InstantaneousTorque = 2, ///< Compute and check torque limits using instantaneous torque
+};
+
+OPENRAVE_API const char* GetDynamicsConstraintsTypeString(DynamicsConstraintsType type);
+
 /// \brief holds parameters for an electric motor
 ///
 /// all speed is in revolutions/second
@@ -1548,7 +1557,7 @@ public:
         std::string strname;         ///< \see KinBody::GetName
         std::vector<Transform> vectrans; ///< \see KinBody::GetLinkTransformations
         std::vector<uint8_t> vLinkEnableStates; ///< \see KinBody::GetLinkEnableStates
-        std::vector<uint8_t> vConnectedBodyActiveStates; ///< IsActive state of ConnectedBody \see RobotBase::GetConnectedBodyActiveStates
+        std::vector<int8_t> vConnectedBodyActiveStates; ///< IsActive state of ConnectedBody \see RobotBase::GetConnectedBodyActiveStates
         std::vector<dReal> jointvalues; ///< \see KinBody::GetDOFValues
         std::string uri; ///< \see KinBody::GetURI
         int updatestamp; ///< \see KinBody::GetUpdateStamp
@@ -2698,5 +2707,8 @@ private:
 };
 
 } // end namespace OpenRAVE
+
+///< to debug Jacobian computations with complex mimic joint dependencies
+#define DEBUG_KINBODYJOINT_CALCULATEJACOBIAN
 
 #endif
