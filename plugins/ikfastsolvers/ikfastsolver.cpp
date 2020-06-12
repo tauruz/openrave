@@ -1456,7 +1456,15 @@ protected:
                 solutionIndicesNameLocal = pDescriber->GetMapDataKey();
             }
             else {
-                RAVELOG_WARN_FORMAT("Cannot compute posture states for vravesol of size %d; use solutionIndicesNameLocal %s", vravesol.size() % solutionIndicesNameLocal);
+                std::stringstream ss;
+                if(!vravesol.empty()) {
+                    ss << vravesol.at(0);
+                    for(size_t i = 1; i < vravesol.size(); ++i) {
+                        ss << ", " << vravesol.at(i);
+                    }
+                }
+                RAVELOG_ERROR_FORMAT("Cannot compute posture states for vravesol [%s] of size %d; use solutionIndicesNameLocal %s", 
+                                     ss.str() % vravesol.size() % solutionIndicesNameLocal);
             }
         }
         if(vsolutionindices.empty()) {
@@ -1464,7 +1472,7 @@ protected:
         }
 
         std::vector< std::pair<std::vector<dReal>, int> > vravesols;
-        list<IkReturnPtr> listlocalikreturns; // orderd with respect to vravesols
+        std::list<IkReturnPtr> listlocalikreturns; // orderd with respect to vravesols
 
         /// if have to check for closest solution, make sure this new solution is closer than best found so far
         //dReal d = dReal(1e30);

@@ -18,6 +18,7 @@
 #define PLUGINS_POSTUREDESCRIBER_POSTUREDESCRIBERINTERFACE_H
 
 #include <openrave/posturedescriber.h> // PostureDescriberBasePtr
+#include "plugindefs.h" // POSTUREDESCRIBER_CLASS_NAME, POSTUREDESCRIBER_MODULE_NAME, POSTUREDESCRIBER_STATE_NAME
 
 namespace OpenRAVE {
 
@@ -65,9 +66,12 @@ inline T operator|=(T& x, T y)
     return x = x | y;
 }
 
-using PostureValueFn = std::function<void(const std::vector<KinBody::JointPtr>& vjoints,
+using PostureValueFn = std::function<void(const std::vector<KinBody::JointPtr>& joints,
                                           const double fTol,
-                                          std::vector<PostureStateInt>& posturestates)>;
+                                          std::vector<double>& posturevalues,
+                                          std::vector<PostureStateInt>& featurestates,
+                                          std::vector<PostureStateInt>& posturestates ///< most needed
+                                          )>;
 
 class OPENRAVE_API PostureDescriber : public PostureDescriberBase
 {
@@ -122,7 +126,11 @@ protected:
     /// \brief Gets the dof indices along a kinematics chain from baselink to eelink
     bool _GetArmIndicesCommand(std::ostream& ssout, std::istream& ssin) const;
 
+    /// \brief Gets robot posture support type cast into int
     bool _GetSupportTypeCommand(std::ostream& ssout, std::istream& ssin) const;
+
+    /// \brief Computes posture values
+    bool _ComputePostureValuesCommand(std::ostream& ssout, std::istream& ssin);
 
     /* ========== `SendJSONCommand` APIs ========== */
     /// \brief `SendJSONCommand` API
@@ -134,51 +142,15 @@ protected:
     double _fTol = 1e-6; ///< tolerance for determining if a robot posture value is considered 0
     PostureValueFn _posturefn; ///< function that computes posture values and states for a kinematics chain
     RobotPostureSupportType _supporttype = RobotPostureSupportType::RPST_NoSupport;
+    std::string _posturestatename = POSTUREDESCRIBER_STATE_NAME;
+
+    /* ========== cached values ========== */
+    std::vector<double>          _posturevalues; ///< cached posture values
+    std::vector<PostureStateInt> _featurestates; ///< cached feature states
+    std::vector<PostureStateInt> _posturestates; ///< cached posture states
 };
 
 using PostureDescriberPtr = boost::shared_ptr<PostureDescriber>;
-
-/// \brief determines whether a robot posture value can be considered as 0.0, postive, or negative
-/// \param [in] x      a posture value
-/// \param [in] tol    tolerance to determine whether x is considered 0.0, so that this value means a hybrid state.
-/// \return 0 if x is considered positive, 1 if considered negative, and 2 (meaning hybrid states) if considered 0.0
-inline PostureStateInt compute_feature_state(const double x, const double fTol) {
-    return (x > fTol) ? 0 : (x < -fTol) ? 1 : 2; // TGN: >= or <= ?
-}
-
-/// \brief Computes a vector of posture state integers using N posture values.
-/// \param [in]  posturevalues    an array of posture values
-/// \param [in]  tol              tolerance to determine whether x is considered 0.0, so that this value means a hybrid state.
-/// \param [out] posturestates    a vector of posture state (unsigned) integers, whose size is always a power of 2
-template <size_t N>
-inline void compute_robot_posture_states(const std::array<double, N>& posturevalues,
-                                         const double fTol,
-                                         std::vector<PostureStateInt>& posturestates) {
-    std::array<PostureStateInt, N> singlestates;
-    for(size_t i = 0; i < N; ++i) {
-        singlestates[i] = compute_feature_state(posturevalues[i], fTol);
-    }
-
-    posturestates = {0};
-    posturestates.reserve(1 << N);
-    for(size_t i = 0; i < N; ++i) {
-        for(PostureStateInt &state : posturestates) {
-            state <<= 1;
-        }
-        if(singlestates[i] == 1) {
-            for(PostureStateInt &state : posturestates) {
-                state |= 1;
-            }
-        }
-        else if (singlestates[i] == 2) {
-            const size_t nstates = posturestates.size();
-            posturestates.insert(end(posturestates), begin(posturestates), end(posturestates));
-            for(size_t j = nstates; j < 2 * nstates; ++j) {
-                posturestates[j] |= 1;
-            }
-        }
-    }
-}
 
 } // namespace OpenRAVE
 
