@@ -2182,10 +2182,11 @@ void KinBody::CalculateRotationJacobian(const int linkindex,
                     continue;
                 }
                 v = pjoint->GetAxis(idof); ///< joint axis of a revolute joint
-                vjacobian[dofindex + idof                ] += dReal(0.5) * (-quat.y * v.x - quat.z * v.y - quat.w * v.z);
-                vjacobian[dofindex + idof + dofstride    ] += dReal(0.5) * ( quat.x * v.x - quat.z * v.z + quat.w * v.y);
-                vjacobian[dofindex + idof + dofstride * 2] += dReal(0.5) * ( quat.x * v.y + quat.y * v.z - quat.w * v.x);
-                vjacobian[dofindex + idof + dofstride * 3] += dReal(0.5) * ( quat.x * v.z - quat.y * v.y + quat.z * v.x);
+                const size_t index = dofindex + idof;
+                vjacobian[index                ] += dReal(0.5) * (-quat.y * v.x - quat.z * v.y - quat.w * v.z);
+                vjacobian[index + dofstride    ] += dReal(0.5) * ( quat.x * v.x - quat.z * v.z + quat.w * v.y);
+                vjacobian[index + dofstride * 2] += dReal(0.5) * ( quat.x * v.y + quat.y * v.z - quat.w * v.x);
+                vjacobian[index + dofstride * 3] += dReal(0.5) * ( quat.x * v.z - quat.y * v.y + quat.z * v.x);
             }
         }
         else {
@@ -2224,12 +2225,12 @@ void KinBody::CalculateRotationJacobian(const int linkindex,
 #if defined(DEBUG_KINBODYJOINT_CALCULATEJACOBIAN)
                         RAVELOG_VERBOSE_FORMAT("Collecting quaternion velocity Jacobian w.r.t dof index %d by the influence of joint %s", dofindex % pjoint->GetName());
 #endif
+                        const size_t index = dofindex + idof;
                         const dReal partialderiv = dofindexDerivativePair.second;
-                        v *= partialderiv;
-                        vjacobian[dofindex + idof                ] += dReal(0.5) * (-quat.y * v.x - quat.z * v.y - quat.w * v.z);
-                        vjacobian[dofindex + idof + dofstride    ] += dReal(0.5) * ( quat.x * v.x - quat.z * v.z + quat.w * v.y);
-                        vjacobian[dofindex + idof + dofstride * 2] += dReal(0.5) * ( quat.x * v.y + quat.y * v.z - quat.w * v.x);
-                        vjacobian[dofindex + idof + dofstride * 3] += dReal(0.5) * ( quat.x * v.z - quat.y * v.y + quat.z * v.x);
+                        vjacobian[index                ] += dReal(0.5) * partialderiv * (-quat.y * v.x - quat.z * v.y - quat.w * v.z);
+                        vjacobian[index + dofstride    ] += dReal(0.5) * partialderiv * ( quat.x * v.x - quat.z * v.z + quat.w * v.y);
+                        vjacobian[index + dofstride * 2] += dReal(0.5) * partialderiv * ( quat.x * v.y + quat.y * v.z - quat.w * v.x);
+                        vjacobian[index + dofstride * 3] += dReal(0.5) * partialderiv * ( quat.x * v.z - quat.y * v.y + quat.z * v.x);
                     }
                 }
             }
@@ -3569,7 +3570,7 @@ void KinBody::_ComputeInternalInformation()
                 Mimic::DOFFormat thisdofformat; ///< construct for pjoint
                 if( bPassiveJoints ) {
                     thisdofformat.dofindex   = -1; ///< mimic dofindex = -1, ...
-                    thisdofformat.jointindex = ijoint + (int)nActiveJoints; ///< but has a generalized joint index
+                    thisdofformat.jointindex = ijoint + nActiveJoints; ///< but has a generalized joint index
                 }
                 else {
                     thisdofformat.dofindex   = pjoint->GetDOFIndex();  ///< >= 0
@@ -3587,7 +3588,7 @@ void KinBody::_ComputeInternalInformation()
                         for(const Mimic::DOFFormat& dofformat : pmimic->_vdofformat) {
                             const JointPtr pjointDepended = dofformat.GetJoint(*this);
                             if( pjointDepended->IsMimic(dofformat.axis) ) {
-                                mapmimic[thisdofformat] = pmimic; ///< pjoint
+                                mapmimic[thisdofformat] = pmimic; ///< pjoint depends on pjointDepended
                                 RAVELOG_DEBUG_FORMAT("mimic joint %s depends on mimic joint %s; thisdofformat: %s; pmimic: %s",
                                                      pjoint->GetName() % pjointDepended->GetName() % thisdofformat.to_string() % pmimic->to_string()
                                 );
@@ -3605,8 +3606,8 @@ void KinBody::_ComputeInternalInformation()
             for(const std::pair<const Mimic::DOFFormat, MimicPtr>& keyvalue : mapmimic) {
                 const Mimic::DOFFormat& thisdofformat = keyvalue.first;
                 const MimicPtr& pmimic = keyvalue.second;
-                std::vector<Mimic::DOFHierarchy>& vmimicdofs = pmimic->_vmimicdofs; ///< collect information of joints on which pmimic depends on
-                const std::vector<Mimic::DOFFormat>& vdofformat = pmimic->_vdofformat; ///<
+                std::vector<Mimic::DOFHierarchy>& vmimicdofs = pmimic->_vmimicdofs; ///< to collect information of active joints on which pmimic depends on
+                const std::vector<Mimic::DOFFormat>& vdofformat = pmimic->_vdofformat; ///<  collected information of all joints on which pmimic depends on
 
                 const JointPtr pjoint = thisdofformat.GetJoint(*this); ///< pjoint depends on all [dofformat.GetJoint(*this) for dofformat in vdofformat]
                 const int ndofformat = vdofformat.size();
@@ -3625,15 +3626,15 @@ void KinBody::_ComputeInternalInformation()
 
                     for(const Mimic::DOFHierarchy& mimicdofDepended : vmimicdofsDepended) {
                         if( vmimicdofformatDepended[mimicdofDepended.dofformatindex] == thisdofformat ) {
-                            // pjointDepended also depends on pjoint that depends on pjointDepended ==> circular dependency!!!
-                            throw OPENRAVE_EXCEPTION_FORMAT(_("joint index %s uses a mimic joint %s that also depends on %s! this is not allowed"), 
+                            throw OPENRAVE_EXCEPTION_FORMAT(_("joint %s depends on a mimic joint %s that also depends on %s; circular dependency!!!"), 
                                                             pjoint->GetName() % pjointDepended->GetName() % pjoint->GetName(), ORE_Failed);
                         }
 
-                        // append a `DOFHierarchy` object in vmimicdofs based on vdofformat
+                        // TGN: Since Mimic::_vmimicdofs only contains active joints (c.f. KinBody::Joint::SetMimicEquations),
+                        // when computing partial/total derivatives by chain rule, we shall use Mimic::_vdofformat
                         Mimic::DOFHierarchy h;
-                        h.dofformatindex = idofformat;
-                        h.dofindex = mimicdofDepended.dofindex;
+                        h.dofformatindex = idofformat; ///< index in vdofformat
+                        h.dofindex = mimicdofDepended.dofindex; // >= 0, dofindex of active joint
                         if( find(vmimicdofs.begin(), vmimicdofs.end(), h) == vmimicdofs.end() ) {
                             vmimicdofs.push_back(h);
                             bchanged = true;
@@ -3650,6 +3651,7 @@ void KinBody::_ComputeInternalInformation()
             for(const JointPtr& pjoint : vjoints) {
                 const int ndof = pjoint->GetDOF();
                 for(int idof = 0; idof < ndof; ++idof) {
+                    pjoint->_vmimic[i].reset();
                 }
             }
         }

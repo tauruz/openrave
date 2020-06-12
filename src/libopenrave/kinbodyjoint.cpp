@@ -1755,11 +1755,11 @@ void KinBody::Joint::SetMimicEquations(int iaxis, const std::string& poseq, cons
             dofformat.axis = 0;
         }
         dofformat.dofindex = -1;
-        const JointPtr pjoint = dofformat.GetJoint(*parent); ///< the joint which pmimic depends on
-        if((pjoint->GetDOFIndex() >= 0)&& !pjoint->IsMimic(dofformat.axis) ) {
-            // pjoint is active, non-mimic
+        const JointPtr pjointDepended = dofformat.GetJoint(*parent); ///< the joint on which `*this` joint depends
+        if( pjointDepended->GetDOFIndex() >= 0 && !pjointDepended->IsMimic(dofformat.axis) ) {
+            // pjointDepended is active, non-mimic
             Mimic::DOFHierarchy h;
-            h.dofindex = dofformat.dofindex = pjoint->GetDOFIndex() + dofformat.axis;
+            h.dofindex = dofformat.dofindex = pjointDepended->GetDOFIndex() + dofformat.axis;
             h.dofformatindex = pmimic->_vdofformat.size();
             pmimic->_vmimicdofs.push_back(h);
         }
@@ -1783,12 +1783,12 @@ void KinBody::Joint::SetMimicEquations(int iaxis, const std::string& poseq, cons
 
         std::vector<OpenRAVEFunctionParserRealPtr> vfns(nVars);
         /* 
-            extract from `eq` the partial derivative formulas ∂z/∂xi for joint z:=z(x0,x1,...xn) defined in `poseq`.
+            extract from `eq` the partial derivative formulas ∂z/∂xi for joint z:=z(x1,x2,...xn) defined in `poseq`.
             `eq` takes form
         
             c0:=......; c1:=......; ......;
-            |x0 formula_∂z_∂x0
-            |x1 formula_∂z_∂x1
+            |x0 formula_∂z_∂x1
+            |x1 formula_∂z_∂x2
             ......
 
             where xi's are joints on which z depends, and ci are common subexpressions in formulas ∂z/∂xi.
