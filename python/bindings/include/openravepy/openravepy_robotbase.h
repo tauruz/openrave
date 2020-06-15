@@ -53,7 +53,6 @@ public:
         void SetName(const std::string& s);
 
         object GetGripperName() const;
-        object GetToolChangerConnectedBodyToolName() const;
 
         object GetToolChangerConnectedBodyToolName() const;
 
