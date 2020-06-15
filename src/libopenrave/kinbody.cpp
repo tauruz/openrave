@@ -3651,7 +3651,7 @@ void KinBody::_ComputeInternalInformation()
             for(const JointPtr& pjoint : vjoints) {
                 const int ndof = pjoint->GetDOF();
                 for(int idof = 0; idof < ndof; ++idof) {
-                    pjoint->_vmimic[i].reset();
+                    pjoint->_vmimic[idof].reset();
                 }
             }
         }
