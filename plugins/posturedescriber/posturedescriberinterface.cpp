@@ -82,7 +82,7 @@ bool CheckJointTypes(const std::vector<JointPtr>& joints, const std::vector<KinB
 
 /// \brief Derives the relation between joint axes of two consecutive joints using the transform between them
 /// \return a NeighbouringTwoJointsRelation enum for the joint axes' relation
-NeighbouringTwoJointsRelation AnalyzeTransformBetweenNeighbouringJoints(const Transform& t, const double tol = 4e-15) {
+NeighbouringTwoJointsRelation AnalyzeTransformBetweenNeighbouringJoints(const Transform& t, const double tol) {
     // tol was increased for densowave-VS087A4-AV6 (2e-15), and then RV-35FM (4e-15)
     const Vector zaxis0(0, 0, 1); // z-axis of the first joint
     const Vector zaxis1 = t.rotate(zaxis0); // z-axis of the second joint
@@ -90,9 +90,9 @@ NeighbouringTwoJointsRelation AnalyzeTransformBetweenNeighbouringJoints(const Tr
 
     NeighbouringTwoJointsRelation o = NeighbouringTwoJointsRelation::NTJR_Unknown;
     if(1.0 - fabs(dotprod) <= tol) {
-        o |= NeighbouringTwoJointsRelation::NTJR_Parallel; // TO-DO: check overlapping
+        o |= NeighbouringTwoJointsRelation::NTJR_Parallel;
         if(zaxis0.cross(t.trans).lengthsqr3() <= tol) {
-            o |= NeighbouringTwoJointsRelation::NTJR_Intersect;
+            o |= NeighbouringTwoJointsRelation::NTJR_Intersect; // NeighbouringTwoJointsRelation::NTJR_Overlap
         }
     }
     else {
@@ -101,7 +101,7 @@ NeighbouringTwoJointsRelation AnalyzeTransformBetweenNeighbouringJoints(const Tr
             o |= NeighbouringTwoJointsRelation::NTJR_Perpendicular;
         }
         if(fabs(zaxis0.cross(zaxis1).dot3(t.trans)) <= tol) {
-            o |= NeighbouringTwoJointsRelation::NTJR_Intersect;
+            o |= NeighbouringTwoJointsRelation::NTJR_Intersect; // NeighbouringTwoJointsRelation::NTJR_Intersect_Perpendicular
         }
     }
 
@@ -117,13 +117,13 @@ NeighbouringTwoJointsRelation AnalyzeTransformBetweenNeighbouringJoints(const Tr
 /// \brief Derives the robot posture support type for a sequence of joints along a kinematics chain
 /// \return a RobotPostureSupportType enum for the kinematics chain
     // const ref
-RobotPostureSupportType DeriveRobotPostureSupportType(const std::vector<JointPtr>& joints) {
+RobotPostureSupportType DeriveRobotPostureSupportType(const std::vector<JointPtr>& joints, const double tol) {
     const size_t njoints = joints.size();
     const std::vector<KinBody::JointType> jointtypes(njoints, KinBody::JointType::JointRevolute); ///< so far these are all revolute
     switch(njoints) {
         case 6: {
             if(!CheckJointTypes(joints, jointtypes)) {
-                RAVELOG_WARN("Not all 6 joints are purely revolute");
+                RAVELOG_WARN_FORMAT("Not all %d joints are purely revolute", njoints);
                 return RobotPostureSupportType::RPST_NoSupport;
             }
             const Transform tJ1J2 = joints[0]->GetInternalHierarchyRightTransform() * joints[1]->GetInternalHierarchyLeftTransform();
@@ -132,30 +132,48 @@ RobotPostureSupportType DeriveRobotPostureSupportType(const std::vector<JointPtr
             const Transform tJ4J5 = joints[3]->GetInternalHierarchyRightTransform() * joints[4]->GetInternalHierarchyLeftTransform();
             const Transform tJ5J6 = joints[4]->GetInternalHierarchyRightTransform() * joints[5]->GetInternalHierarchyLeftTransform();
             if(
-                   ((AnalyzeTransformBetweenNeighbouringJoints(tJ1J2) & NeighbouringTwoJointsRelation::NTJR_Perpendicular) != NeighbouringTwoJointsRelation::NTJR_Unknown)
-                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ2J3) & NeighbouringTwoJointsRelation::NTJR_Parallel)      != NeighbouringTwoJointsRelation::NTJR_Unknown)
-                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ3J4) & NeighbouringTwoJointsRelation::NTJR_Perpendicular) != NeighbouringTwoJointsRelation::NTJR_Unknown)
-                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ4J5) & NeighbouringTwoJointsRelation::NTJR_Perpendicular) != NeighbouringTwoJointsRelation::NTJR_Unknown)
-                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ5J6) & NeighbouringTwoJointsRelation::NTJR_Perpendicular) != NeighbouringTwoJointsRelation::NTJR_Unknown)
+                   ((AnalyzeTransformBetweenNeighbouringJoints(tJ1J2, tol) & NeighbouringTwoJointsRelation::NTJR_Perpendicular) != NeighbouringTwoJointsRelation::NTJR_Unknown)
+                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ2J3, tol) & NeighbouringTwoJointsRelation::NTJR_Parallel)      != NeighbouringTwoJointsRelation::NTJR_Unknown)
+                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ3J4, tol) & NeighbouringTwoJointsRelation::NTJR_Perpendicular) != NeighbouringTwoJointsRelation::NTJR_Unknown)
+                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ4J5, tol) == NeighbouringTwoJointsRelation::NTJR_Intersect_Perpendicular))
+                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ5J6, tol) == NeighbouringTwoJointsRelation::NTJR_Intersect_Perpendicular))
                 ) {
+
+                // Test J4's and J6's axes also intersect by rotating J5 by 0, pi/2, pi, 3*pi/2
+                // All transforms and vectors below are in J4 frame
+                const Vector zaxis(0, 0, 1);
+                const Vector& J4axis = zaxis;
+                Transform tJ5, tJ4J6;
+                Vector J6axis;
+                double triprod = 0.0;
+                const int nRotations = 4;
+                const double fIncrement = M_PI * 2.0/(double) nRotations;
+                for(int i = 0; i < nRotations; ++i) {
+                    tJ5.rot = quatFromAxisAngle(zaxis, /*J5 = */fIncrement * i);
+                    tJ4J6 = tJ4J5 * tJ5 * tJ5J6;
+                    J6axis = tJ4J6.rotate(zaxis);
+                    triprod = J4axis.cross(J6axis).dot(tJ4J6.trans);
+                    if(fabs(triprod) > tol) {
+                        return RobotPostureSupportType::RPST_NoSupport;
+                    }
+                }
                 return RobotPostureSupportType::RPST_6R_General; ///< general 6R robots with the last joint axes intersecting at a point
             }
-
             break;
         }
 
         case 4: {
             if(!CheckJointTypes(joints, jointtypes)) {
-                RAVELOG_WARN("Not all 4 joints are purely revolute");
+                RAVELOG_WARN_FORMAT("Not all %d joints are purely revolute", njoints);
                 return RobotPostureSupportType::RPST_NoSupport;
             }
             const Transform tJ1J2 = joints[0]->GetInternalHierarchyRightTransform() * joints[1]->GetInternalHierarchyLeftTransform();
             const Transform tJ2J3 = joints[1]->GetInternalHierarchyRightTransform() * joints[2]->GetInternalHierarchyLeftTransform();
             const Transform tJ3J4 = joints[2]->GetInternalHierarchyRightTransform() * joints[3]->GetInternalHierarchyLeftTransform();
             if(
-                   AnalyzeTransformBetweenNeighbouringJoints(tJ1J2) == NeighbouringTwoJointsRelation::NTJR_Intersect_Perpendicular
-                && AnalyzeTransformBetweenNeighbouringJoints(tJ2J3) == NeighbouringTwoJointsRelation::NTJR_Parallel
-                && AnalyzeTransformBetweenNeighbouringJoints(tJ3J4) == NeighbouringTwoJointsRelation::NTJR_Parallel
+                   AnalyzeTransformBetweenNeighbouringJoints(tJ1J2, tol) == NeighbouringTwoJointsRelation::NTJR_Intersect_Perpendicular
+                && AnalyzeTransformBetweenNeighbouringJoints(tJ2J3, tol) == NeighbouringTwoJointsRelation::NTJR_Parallel
+                && AnalyzeTransformBetweenNeighbouringJoints(tJ3J4, tol) == NeighbouringTwoJointsRelation::NTJR_Parallel
                 ) {
                 return RobotPostureSupportType::RPST_4R_Type_A; ///< a special type of 4R robot the last three parallel joint axes perpendicular to the first joint axis
             }
@@ -164,15 +182,15 @@ RobotPostureSupportType DeriveRobotPostureSupportType(const std::vector<JointPtr
 
         case 3: {
             if(!CheckJointTypes(joints, jointtypes)) {
-                RAVELOG_WARN("Not all 3 joints are purely revolute");
+                RAVELOG_WARN_FORMAT("Not all %d joints are purely revolute", njoints);
                 return RobotPostureSupportType::RPST_NoSupport;
             }
 
             const Transform tJ1J2 = joints[0]->GetInternalHierarchyRightTransform() * joints[1]->GetInternalHierarchyLeftTransform();
             const Transform tJ2J3 = joints[1]->GetInternalHierarchyRightTransform() * joints[2]->GetInternalHierarchyLeftTransform();
             if(
-                   ((AnalyzeTransformBetweenNeighbouringJoints(tJ1J2) & NeighbouringTwoJointsRelation::NTJR_Parallel) != NeighbouringTwoJointsRelation::NTJR_Unknown)
-                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ2J3) & NeighbouringTwoJointsRelation::NTJR_Parallel) != NeighbouringTwoJointsRelation::NTJR_Unknown)
+                   ((AnalyzeTransformBetweenNeighbouringJoints(tJ1J2, tol) & NeighbouringTwoJointsRelation::NTJR_Parallel) != NeighbouringTwoJointsRelation::NTJR_Unknown)
+                && ((AnalyzeTransformBetweenNeighbouringJoints(tJ2J3, tol) & NeighbouringTwoJointsRelation::NTJR_Parallel) != NeighbouringTwoJointsRelation::NTJR_Unknown)
                 ) {
                 return RobotPostureSupportType::RPST_RRR_Parallel; ///< a type of robot that has only three revolute joints whose axes are parallel
             }
@@ -300,7 +318,7 @@ bool PostureDescriber::Init(const LinkPair& kinematicsChain) {
         _armindices.push_back(joint->GetDOFIndex()); // collect arm indices
     }
 
-    _supporttype = DeriveRobotPostureSupportType(_joints);
+    _supporttype = DeriveRobotPostureSupportType(_joints, _fGeometryTol);
     switch(_supporttype) {
     case RobotPostureSupportType::RPST_6R_General: {
         _posturefn = ComputePostureStates6RGeneral;
@@ -333,9 +351,28 @@ void PostureDescriber::_GetJointsFromKinematicsChain(const LinkPair& kinematicsC
     const int eelinkind = kinematicsChain[1]->GetIndex();
     const KinBodyPtr probot = kinematicsChain[0]->GetParent();
     probot->GetChain(baselinkind, eelinkind, joints);
-    // std::string typestr;
+
+    // Step 1: Check whether all mimic joints are "virtual", in the sense that we can combine each with its next active joint
+    int njoints = joints.size();
+    for(int ijoint = 0; ijoint < njoints - 1; ++ijoint) {
+        const JointPtr& currJoint = joints[ijoint];
+        if(!currJoint->IsMimic()) {
+            continue;
+        }
+        const JointPtr& nextJoint = joints[ijoint + 1];
+        const Transform t = currJoint->GetInternalHierarchyRightTransform() * nextJoint->GetInternalHierarchyLeftTransform();
+        if(t.trans.lengthsqr3() > _fTol) {
+            std::stringstream ss;
+            ss << "Transform between mimic joint " << currJoint->GetName() << " and its next joint " << nextJoint->GetName() << " has a nonzero translate, so we cannot support; transform is " << t;
+            RAVELOG_WARN_FORMAT("%s", ss.str());
+            joints.clear();
+            return;
+        }
+    }
+
+    // Step 2: Remove static and mimic joints
     for(std::vector<JointPtr>::iterator it = begin(joints); it != end(joints); ) {
-        if((*it)->IsStatic() || (*it)->GetDOFIndex()==-1) {
+        if((*it)->IsStatic() || (*it)->IsMimic() || (*it)->GetDOFIndex()==-1) {
             it = joints.erase(it);
         }
         else {
@@ -355,7 +392,7 @@ bool PostureDescriber::Supports(const LinkPair& kinematicsChain) const {
 
     std::vector<JointPtr> joints;
     _GetJointsFromKinematicsChain(kinematicsChain, joints);
-    const RobotPostureSupportType supporttype = DeriveRobotPostureSupportType(joints);
+    const RobotPostureSupportType supporttype = DeriveRobotPostureSupportType(joints, _fGeometryTol);
     if(supporttype != RobotPostureSupportType::RPST_NoSupport) {
         return true;
     }
