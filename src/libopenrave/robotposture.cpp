@@ -127,4 +127,159 @@ bool RobotBase::ComputePostureStates(std::vector<PostureStateInt>& posturestates
     return this->ComputePostureStates(posturestates, _mEssentialLinkPairs.at(pmanip), dofvalues);
 }
 
+#ifndef M_TWO_PI
+#define M_TWO_PI 6.2831853071795864769252
+#endif
+
+void RobotBase::Manipulator::SetupMultiTurnCacheValues()
+{
+    const RobotBasePtr probot = this->GetRobot();
+    const RobotBase::RobotStateSaver saver(probot);
+    const std::vector<int>& vArmIndices = this->GetArmIndices();
+    probot->GetDOFLimits(_qlower, _qupper, vArmIndices);
+    const size_t armdof = this->GetArmDOF();
+    _vjointtypes.resize(armdof, 0);
+    _qbigrangeindices.clear();
+    _qbigrangemaxsols.clear();
+    _qbigrangemaxcumprod = {1};
+    for(size_t i = 0; i < armdof; ++i) {
+        const int armindex = vArmIndices[i];
+        const KinBody::JointPtr pjoint = probot->GetJointFromDOFIndex(armindex);
+        const int dofindex = pjoint->GetDOFIndex();
+        const int iaxis = armindex - dofindex;
+        _vjointtypes[i] = pjoint->IsPrismatic(iaxis) ? 0 : pjoint->IsCircular(iaxis) ? 2 : 1
+
+        if(_vjointtypes[i] != 1) {
+            continue;
+        }
+
+        const double qrange = _qupper[i] - _qlower[i];
+        if( qrange > M_TWO_PI ) {
+            // ensure pjoint is revolute (1 dof), neither prismatic nor circular (3 dof)
+            _qbigrangeindices.push_back(i);
+            const int npossiblejvals = 1 + int(qrange/M_TWO_PI);
+            _qbigrangemaxsols.push_back(npossiblejvals); // max redundant solutions
+            _qbigrangemaxcumprod.push_back(_qbigrangemaxcumprod.back() * npossiblejvals);
+        }
+    } 
+}
+
+bool RobotBase::Manipulator::_CheckDOFValues(std::vector<double>& jvals) const
+{
+    const size_t armdof = this->GetArmDOF();
+    if(jvals.size() != armdof) {
+        return false;
+    }
+
+    for (size_t i = 0; i < armdof; ++i) {
+        double& jval = jvals[i];
+        if (_vjointtypes[i] == 2) {
+            // circular
+            while (jval > M_PI) {
+                jval -= M_TWO_PI;
+            }
+            while (jval <= -M_PI) {
+                jval += M_TWO_PI;
+            }
+        }
+        else if (_vjointtypes[i] == 1) {
+            // revolute
+            while (jval > _qupper[i]) {
+                jval -= M_TWO_PI;
+            }
+            while (jval < _qlower[i]) {
+                jval += M_TWO_PI;
+            }
+            // in this case jval may not be in (-pi, pi]
+        }
+        // due to error propagation, give error bounds for lower and upper limits
+        if (jval < _qlower[i] - g_fEpsilonJointLimit || jval > _qupper[i] + g_fEpsilonJointLimit) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int RobotBase::Manipulator::ComputeMultiTurnIndex(const std::vector<double>& jvals)
+{    
+    std::vector<double> solbase = jvals;
+    if(!_CheckDOFValues(solbase)) {
+        return -1; // invalid
+    }
+
+    if(_qbigrangeindices.empty()) {
+        return 0; // no revolute/circular joint has range >= 2*pi
+    }
+
+    const size_t nindices = _qbigrangeindices.size(); // > 0
+    size_t prod = 1;
+    int multiTurnIndex = 0;
+
+    for(size_t i = 0; i < nindices; ++i) {
+        const size_t index = _qbigrangeindices[i];
+        const double fbase = solbase[index];
+        int multiTurnSubIndex = -1;
+        int count = 0;
+
+        if(MATH_FABS(jvals[index] - fbase) <= g_fEpsilonJointLimit) {
+            multiTurnSubIndex = count;
+        }
+        
+        if(multiTurnSubIndex == -1) {
+            for(double f = fbase - M_TWO_PI; f >= _qlower[index]; f -= M_TWO_PI) {
+                ++count;
+                if(MATH_FABS(jvals[index] - fbase) <= g_fEpsilonJointLimit) {
+                    multiTurnSubIndex = count;
+                    break;
+                }
+            }
+        }
+
+        if(multiTurnSubIndex == -1) {
+            for(double f = fbase + M_TWO_PI; f <= _qupper[index]; f += M_TWO_PI) {
+                ++count;
+                if(MATH_FABS(jvals[index] - fbase) <= g_fEpsilonJointLimit) {
+                    multiTurnSubIndex = count;
+                    break;
+                }
+            }
+        }
+
+        OPENRAVE_ASSERT_FORMAT0(multiTurnSubIndex != -1, "Must have set multiTurnSubIndex", ORE_InvalidState);
+
+        // to recall, _qbigrangemaxsols[k] is  1 + int((_qupper[i]-_qlower[i])/M_TWO_PI);
+        OPENRAVE_ASSERT_OP_FORMAT(multiTurnSubIndex, <=, _qbigrangemaxsols[i],
+                                  "exceeded max possible redundant solutions for manip arm index %d",
+                                  multiTurnSubIndex, ORE_InconsistentConstraints);
+
+        multiTurnIndex += multiTurnSubIndex * _qbigrangemaxcumprod[i];
+    }
+
+    /*
+       Assume that j0, j1, ..., j5 each have {2, 1, 3, 2, 1, 4} solutions.
+
+       Assume _qbigrangeindices = {0, 2, 3, 4, 5}, and hence nindices = 5.
+
+       Hence {2, 3, 2, 1, 4}, and nTotal = 2x3x2x1x4 = 48.
+
+       The simpler algorithm works as follows. Say index = 35.
+
+       35 / 2 = 17 ... 1
+       17 / 3 =  5 ... 2
+       5  / 2 =  2 ... 1
+       2  / 1 =  2 ... 0  (skip, as remainder is always 0)
+       2  / 4 =  0 ... 2
+
+       So we have indices [1, 2, 1, 0, 2].
+
+       Assume vpossiblejvals = {3, 3, 2, 2, 4}. Then _qbigrangemaxcumprod = {1, 3, 9, 18, 36, 144}.
+
+       Then p.second stores
+
+       index = 1*1 + 2*3 + 1*9 + 0*18 + 2*36 = 88.
+
+     */
+    return multiTurnIndex;
+}
+
 } // end namespace OpenRAVE
